@@ -350,7 +350,7 @@ final class Client implements Contracts\Client
 
 
         $responseObject = $this->serializer->deserialize(
-            $response->getBody()->getContents(),
+            (string) $response->getBody(),
             $responsePayload,
             'json',
         );
