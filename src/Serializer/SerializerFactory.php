@@ -23,6 +23,7 @@ class SerializerFactory
                 $registry->registerSubscribingHandler(new BigDecimalHandler());
                 $registry->registerSubscribingHandler(new TimestampHandler());
                 $registry->registerSubscribingHandler(new ComaSeparatedHandler());
+                $registry->registerSubscribingHandler(new EarnLockTypeHandler());
             });
 
         return $builder->build();

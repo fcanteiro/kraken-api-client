@@ -308,6 +308,48 @@ final class Client implements Contracts\Client
     }
 
     /**
+     * List earn strategies along with their parameters.
+     *
+     * Requires a valid API key but not specific permission is required.
+     *
+     * Returns only strategies that are available to the user based on geographic region.
+     *
+     * When the user does not meet the tier restriction:
+     * - `can_allocate` will be false
+     * - `allocation_restriction_info` indicates `Tier` as the restriction reason
+     *
+     * Earn products generally require Intermediate tier. Get your account verified to access earn.
+     *
+     * A note about `lock_type`:
+     * - `instant`: can be deallocated without an unbonding period. This is called flexible in the UI.
+     * - `bonded`: has an unbonding period. Deallocation will not happen until this period has passed.
+     * - `flex`: "Kraken rewards". This is earning on your spot balances where eligible. It's turned on account wide from the UI and you cannot manually allocate to these strategies.
+     *
+     * Paging isn't yet implemented, so the endpoint always returns all data in the first page.
+     *
+     * @param  string|null  $asset
+     * @param  array  $lockType
+     * @param  bool  $ascending
+     * @return EarnStrategies
+     * @throws \GuzzleHttp\Exception\GuzzleException
+     * @see https://docs.kraken.com/api/docs/rest-api/list-strategies
+     */
+    public function getEarnStrategies(?string $asset = null, array $lockType = ['flex', 'bonded', 'instant'], bool $ascending = false): EarnStrategies
+    {
+        return $this->request(
+            method: 'private/Earn/Strategies',
+            responsePayload: EarnStrategiesResponse::class,
+            parameters: [
+                'asset' => $asset,
+                'lock_type' => $lockType,
+                'ascending' => $ascending ? 'true' : 'false',
+                // 'cursor' => '10', // not yet implemented
+                // 'limit' => 10, // not yet implemented
+            ],
+        )->result ?? null;
+    }
+
+    /**
      * Make request
      *
      * @param string $method API Endpoint
