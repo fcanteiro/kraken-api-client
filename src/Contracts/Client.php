@@ -9,6 +9,8 @@ use Butschster\Kraken\Responses\Entities\AddOrder\OrderAdded;
 use Butschster\Kraken\Responses\Entities\CancelOrdersAfterTimeout;
 use Butschster\Kraken\Responses\Entities\DepositAddresses;
 use Butschster\Kraken\Responses\Entities\DepositMethods;
+use Butschster\Kraken\Responses\Entities\Earn\Allocation\Allocations;
+use Butschster\Kraken\Responses\Entities\Earn\EarnStrategies;
 use Butschster\Kraken\Responses\Entities\OrderBook\Orders;
 use Butschster\Kraken\Responses\Entities\Orders\ClosedOrders;
 use Butschster\Kraken\Responses\Entities\Orders\Order;
@@ -23,6 +25,7 @@ use Butschster\Kraken\ValueObjects\AssetClass;
 use Butschster\Kraken\ValueObjects\AssetPair;
 use Butschster\Kraken\ValueObjects\TradableInfo;
 use DateTimeInterface;
+use GuzzleHttp\Exception\GuzzleException;
 
 interface Client
 {
@@ -208,4 +211,123 @@ interface Client
      * @return WithdrawalInformation
      */
     public function getWithdrawalInformation(string $asset, string $key, BigDecimal $amount): WithdrawalInformation;
+
+    /**
+     * List earn strategies along with their parameters.
+     *
+     * Requires a valid API key but not specific permission is required.
+     *
+     * Returns only strategies that are available to the user based on geographic region.
+     *
+     * When the user does not meet the tier restriction:
+     * - `can_allocate` will be false
+     * - `allocation_restriction_info` indicates `Tier` as the restriction reason
+     *
+     * Earn products generally require Intermediate tier. Get your account verified to access earn.
+     *
+     * A note about `lock_type`:
+     * - `instant`: can be deallocated without an unbonding period. This is called flexible in the UI.
+     * - `bonded`: has an unbonding period. Deallocation will not happen until this period has passed.
+     * - `flex`: "Kraken rewards". This is earning on your spot balances where eligible. It's turned on account wide from the UI and you cannot manually allocate to these strategies.
+     *
+     * Paging isn't yet implemented, so the endpoint always returns all data in the first page.
+     *
+     * @see https://docs.kraken.com/api/docs/rest-api/list-strategies
+     * @param  string|null  $asset
+     * @param  array  $lockType
+     * @param  bool  $ascending
+     * @return EarnStrategies
+     */
+    public function getEarnStrategies(?string $asset = null, array $lockType = ['flex', 'bonded', 'instant'], bool $ascending = false): EarnStrategies;
+
+    /**
+     * List all allocations for the user.
+     *
+     * Requires the `Query Funds` API key permission.
+     *
+     * By default, all allocations are returned, even for strategies that have been used in the past and have zero balance now.
+     * This allows the user to see how much was earned with a given strategy in the past. The `hide_zero_allocations` parameter
+     * can be used to remove zero balance entries from the output. Paging hasn't been implemented for this method as we don't
+     * expect the result for a particular user to be overwhelmingly large.
+     *
+     * All amounts in the output can be denominated in a currency of the user's choice (the `converted_asset` parameter).
+     *
+     * Information about when the next reward will be paid to the client is also provided in the output.
+     *
+     * Allocated funds can be in up to 4 states:
+     * - bonding
+     * - allocated
+     * - exit_queue (ETH only)
+     * - unbonding
+     *
+     * Any funds in `total` not in `bonding`/`unbonding` are simply allocated and earning rewards. Depending on the strategy, funds
+     * in the other 3 states can also be earning rewards. Consult the output of `/Earn/Strategies` to know whether `bonding`/`unbonding`
+     * earn rewards. `ETH` in `exit_queue` still earns rewards.
+     *
+     * Note that for `ETH`, when the funds are in the `exit_queue` state, the `expires` time given is the time when the funds will have
+     * finished unbonding, not when they go from exit queue to unbonding.
+     *
+     * (Un)bonding time estimate can be inaccurate right after having (de)allocated the funds. Wait 1-2 minutes after (de)allocating
+     * to get an accurate result.
+     *
+     * @see https://docs.kraken.com/api/docs/rest-api/list-allocations
+     * @param  string  $convertedAsset The currency to which amounts should be converted. Default is 'USD'.
+     * @param  bool  $hideZeroAllocations Whether to hide allocations with zero balance. Default is false.
+     * @param  bool  $ascending Whether to sort the results in ascending order. Default is false.
+     * @return Allocations The list of allocations.
+     */
+    public function getEarnAllocations(string $convertedAsset = 'USD', bool $hideZeroAllocations = false, bool $ascending = false): Allocations;
+
+    /**
+     * Allocate funds to the Strategy.
+     *
+     * Requires the `Earn Funds` API key permission. The amount must always be defined.
+     *
+     * This method is asynchronous. A couple of preflight checks are performed synchronously on behalf of the
+     * method before it is dispatched further. The client is required to poll the result using the
+     * `/0/private/Earn/AllocateStatus` endpoint.
+     *
+     * There can be only one (de)allocation request in progress for a given user and strategy at any time. While the operation is in progress:
+     * - `pending` attribute in `/Earn/Allocations` response for the strategy indicates that funds are being allocated,
+     * - `pending` attribute in `/Earn/AllocateStatus` response will be true.
+     *
+     * Following specific errors within `Earnings` class can be returned by this method:
+     * - Minimum allocation: `EEarnings:Below min:(De)allocation operation amount less than minimum`
+     * - Allocation in progress: `EEarnings:Busy:Another (de)allocation for the same strategy is in progress`
+     * - Service temporarily unavailable: `EEarnings:Busy`. Try again in a few minutes.
+     * - User tier verification: `EEarnings:Permission denied:The user's tier is not high enough`
+     * - Strategy not found: `EGeneral:Invalid arguments:Invalid strategy ID`
+     *
+     * @see https://docs.kraken.com/api/docs/rest-api/allocate-strategy
+     * @param  BigDecimal  $amount
+     * @param  string  $strategyId
+     * @return bool
+     */
+    public function allocateEarnFunds(BigDecimal $amount, string $strategyId): bool;
+
+
+    /**
+     * Deallocate funds from a strategy.
+     *
+     * Requires the `Earn Funds` API key permission. The amount must always be defined.
+     *
+     * This method is asynchronous. A couple of preflight checks are performed synchronously on behalf of the
+     * method before it is dispatched further. If the method returns HTTP 202 code, the client is required to poll
+     * the result using the `/Earn/DeallocateStatus` endpoint.
+     *
+     * There can be only one (de)allocation request in progress for a given user and strategy. While the operation is in progress:
+     * - `pending` attribute in `Allocations` response for the strategy will hold the amount that is being deallocated (negative amount)
+     * - `pending` attribute in `DeallocateStatus` response will be true.
+     *
+     * Following specific errors within `Earnings` class can be returned by this method:
+     * - Minimum allocation: `EEarnings:Below min:(De)allocation operation amount less than minimum allowed`
+     * - Allocation in progress: `EEarnings:Busy:Another (de)allocation for the same strategy is in progress`
+     * - Strategy not found: `EGeneral:Invalid arguments:Invalid strategy ID`
+     *
+     * @see https://docs.kraken.com/api/docs/rest-api/deallocate-strategy
+     * @param  BigDecimal  $amount
+     * @param  string  $strategyId
+     * @return bool
+     */
+    public function deallocateEarnFunds(BigDecimal $amount, string $strategyId): bool;
 }

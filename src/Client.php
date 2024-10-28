@@ -10,6 +10,7 @@ use Butschster\Kraken\Exceptions\KrakenApiErrorException;
 use Butschster\Kraken\Responses\{AccountBalanceResponse,
     AddOrderResponse,
     AssetInfoResponse,
+    BoolStatusResponse,
     CancelOrderResponse,
     CancelOrdersAfterTimeoutResponse,
     ClosedOrdersResponse,
@@ -42,6 +43,7 @@ use Butschster\Kraken\Responses\{AccountBalanceResponse,
 use Butschster\Kraken\ValueObjects\{
     AssetClass, AssetPair, TradableInfo
 };
+use Butschster\Kraken\Requests\EarnAllocationRequest;
 use DateTimeInterface;
 use Illuminate\Support\Str;
 use JMS\Serializer\SerializerInterface;
@@ -311,33 +313,6 @@ final class Client implements Contracts\Client
         )->result;
     }
 
-    /**
-     * List earn strategies along with their parameters.
-     *
-     * Requires a valid API key but not specific permission is required.
-     *
-     * Returns only strategies that are available to the user based on geographic region.
-     *
-     * When the user does not meet the tier restriction:
-     * - `can_allocate` will be false
-     * - `allocation_restriction_info` indicates `Tier` as the restriction reason
-     *
-     * Earn products generally require Intermediate tier. Get your account verified to access earn.
-     *
-     * A note about `lock_type`:
-     * - `instant`: can be deallocated without an unbonding period. This is called flexible in the UI.
-     * - `bonded`: has an unbonding period. Deallocation will not happen until this period has passed.
-     * - `flex`: "Kraken rewards". This is earning on your spot balances where eligible. It's turned on account wide from the UI and you cannot manually allocate to these strategies.
-     *
-     * Paging isn't yet implemented, so the endpoint always returns all data in the first page.
-     *
-     * @param  string|null  $asset
-     * @param  array  $lockType
-     * @param  bool  $ascending
-     * @return EarnStrategies
-     * @throws \GuzzleHttp\Exception\GuzzleException
-     * @see https://docs.kraken.com/api/docs/rest-api/list-strategies
-     */
     public function getEarnStrategies(?string $asset = null, array $lockType = ['flex', 'bonded', 'instant'], bool $ascending = false): EarnStrategies
     {
         return $this->request(
@@ -353,42 +328,6 @@ final class Client implements Contracts\Client
         )->result;
     }
 
-    /**
-     * List all allocations for the user.
-     *
-     * Requires the `Query Funds` API key permission.
-     *
-     * By default, all allocations are returned, even for strategies that have been used in the past and have zero balance now.
-     * This allows the user to see how much was earned with a given strategy in the past. The `hide_zero_allocations` parameter
-     * can be used to remove zero balance entries from the output. Paging hasn't been implemented for this method as we don't
-     * expect the result for a particular user to be overwhelmingly large.
-     *
-     * All amounts in the output can be denominated in a currency of the user's choice (the `converted_asset` parameter).
-     *
-     * Information about when the next reward will be paid to the client is also provided in the output.
-     *
-     * Allocated funds can be in up to 4 states:
-     * - bonding
-     * - allocated
-     * - exit_queue (ETH only)
-     * - unbonding
-     *
-     * Any funds in `total` not in `bonding`/`unbonding` are simply allocated and earning rewards. Depending on the strategy, funds
-     * in the other 3 states can also be earning rewards. Consult the output of `/Earn/Strategies` to know whether `bonding`/`unbonding`
-     * earn rewards. `ETH` in `exit_queue` still earns rewards.
-     *
-     * Note that for `ETH`, when the funds are in the `exit_queue` state, the `expires` time given is the time when the funds will have
-     * finished unbonding, not when they go from exit queue to unbonding.
-     *
-     * (Un)bonding time estimate can be inaccurate right after having (de)allocated the funds. Wait 1-2 minutes after (de)allocating
-     * to get an accurate result.
-     *
-     * @param  string  $convertedAsset The currency to which amounts should be converted. Default is 'USD'.
-     * @param  bool  $hideZeroAllocations Whether to hide allocations with zero balance. Default is false.
-     * @param  bool  $ascending Whether to sort the results in ascending order. Default is false.
-     * @return Allocations The list of allocations.
-     * @throws \GuzzleHttp\Exception\GuzzleException
-     */
     public function getEarnAllocations(string $convertedAsset = 'USD', bool $hideZeroAllocations = false, bool $ascending = false): Allocations
     {
         return $this->request(
@@ -399,6 +338,28 @@ final class Client implements Contracts\Client
                 'converted_asset' => $convertedAsset,
                 'hide_zero_allocations' => $hideZeroAllocations ? 'true' : 'false',
             ]
+        )->result;
+    }
+
+    public function allocateEarnFunds(BigDecimal $amount, string $strategyId): bool
+    {
+        $request = new EarnAllocationRequest($amount, $strategyId);
+
+        return $this->request(
+            method: 'private/Earn/Allocate',
+            responsePayload: BoolStatusResponse::class,
+            parameters: $request->toArray(),
+        )->result;
+    }
+
+    public function deallocateEarnFunds(BigDecimal $amount, string $strategyId): bool
+    {
+        $request = new EarnAllocationRequest($amount, $strategyId);
+
+        return $this->request(
+            method: 'private/Earn/Deallocate',
+            responsePayload: BoolStatusResponse::class,
+            parameters: $request->toArray(),
         )->result;
     }
 
