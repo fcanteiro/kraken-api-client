@@ -15,10 +15,12 @@ use Butschster\Kraken\Responses\{AccountBalanceResponse,
     ClosedOrdersResponse,
     DepositAddressesResponse,
     DepositMethodsResponse,
+    EarnAllocationsResponse,
     EarnStrategiesResponse,
     Entities\AddOrder\OrderAdded,
     Entities\CancelOrdersAfterTimeout,
     Entities\DepositMethods,
+    Entities\Earn\Allocation\Allocations,
     Entities\Earn\EarnStrategies,
     Entities\Orders\ClosedOrders,
     Entities\ServerTime,
@@ -348,6 +350,55 @@ final class Client implements Contracts\Client
                 // 'cursor' => '10', // not yet implemented
                 // 'limit' => 10, // not yet implemented
             ],
+        )->result;
+    }
+
+    /**
+     * List all allocations for the user.
+     *
+     * Requires the `Query Funds` API key permission.
+     *
+     * By default, all allocations are returned, even for strategies that have been used in the past and have zero balance now.
+     * This allows the user to see how much was earned with a given strategy in the past. The `hide_zero_allocations` parameter
+     * can be used to remove zero balance entries from the output. Paging hasn't been implemented for this method as we don't
+     * expect the result for a particular user to be overwhelmingly large.
+     *
+     * All amounts in the output can be denominated in a currency of the user's choice (the `converted_asset` parameter).
+     *
+     * Information about when the next reward will be paid to the client is also provided in the output.
+     *
+     * Allocated funds can be in up to 4 states:
+     * - bonding
+     * - allocated
+     * - exit_queue (ETH only)
+     * - unbonding
+     *
+     * Any funds in `total` not in `bonding`/`unbonding` are simply allocated and earning rewards. Depending on the strategy, funds
+     * in the other 3 states can also be earning rewards. Consult the output of `/Earn/Strategies` to know whether `bonding`/`unbonding`
+     * earn rewards. `ETH` in `exit_queue` still earns rewards.
+     *
+     * Note that for `ETH`, when the funds are in the `exit_queue` state, the `expires` time given is the time when the funds will have
+     * finished unbonding, not when they go from exit queue to unbonding.
+     *
+     * (Un)bonding time estimate can be inaccurate right after having (de)allocated the funds. Wait 1-2 minutes after (de)allocating
+     * to get an accurate result.
+     *
+     * @param  string  $convertedAsset The currency to which amounts should be converted. Default is 'USD'.
+     * @param  bool  $hideZeroAllocations Whether to hide allocations with zero balance. Default is false.
+     * @param  bool  $ascending Whether to sort the results in ascending order. Default is false.
+     * @return Allocations The list of allocations.
+     * @throws \GuzzleHttp\Exception\GuzzleException
+     */
+    public function getEarnAllocations(string $convertedAsset = 'USD', bool $hideZeroAllocations = false, bool $ascending = false): Allocations
+    {
+        return $this->request(
+            method: 'private/Earn/Allocations',
+            responsePayload: EarnAllocationsResponse::class,
+            parameters: [
+                'ascending' => $ascending ? 'true' : 'false',
+                'converted_asset' => $convertedAsset,
+                'hide_zero_allocations' => $hideZeroAllocations ? 'true' : 'false',
+            ]
         )->result;
     }
 
