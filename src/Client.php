@@ -15,9 +15,11 @@ use Butschster\Kraken\Responses\{AccountBalanceResponse,
     ClosedOrdersResponse,
     DepositAddressesResponse,
     DepositMethodsResponse,
+    EarnStrategiesResponse,
     Entities\AddOrder\OrderAdded,
     Entities\CancelOrdersAfterTimeout,
     Entities\DepositMethods,
+    Entities\Earn\EarnStrategies,
     Entities\Orders\ClosedOrders,
     Entities\ServerTime,
     Entities\SystemStatus,
@@ -346,7 +348,7 @@ final class Client implements Contracts\Client
                 // 'cursor' => '10', // not yet implemented
                 // 'limit' => 10, // not yet implemented
             ],
-        )->result ?? null;
+        )->result;
     }
 
     /**
